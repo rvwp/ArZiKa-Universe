@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ArZiKa Universe</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+
+        body {
+            background-color: #050505;
+            font-family: 'Space Mono', monospace;
+            overflow: hidden; /* Prevent scroll */
+            touch-action: none; /* Prevent pull-to-refresh on mobile */
+        }
+
+        /* Retro Scanlines */
+        .scanlines::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 10;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+
+        /* Vignette */
+        .vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, transparent 50%, black 100%);
+            pointer-events: none;
+            z-index: 11;
+        }
+
+        .hud-text {
+            text-shadow: 0 0 5px rgba(0, 255, 0, 0.7);
+        }
+        
+        #minimap {
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+            border: 1px solid #333;
+            background: rgba(0,0,0,0.8);
+        }
+
+        /* Mobile D-Pad */
+        .dpad-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.1s;
+            user-select: none;
+        }
+        .dpad-btn:active {
+            background: rgba(0, 255, 100, 0.4);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col text-white">
+
+    <!-- HUD / UI -->
+    <div class="absolute top-0 left-0 w-full p-4 z-20 flex justify-between items-start pointer-events-none">
+        <div>
+            <h1 class="text-xl font-bold text-emerald-400 tracking-tighter hud-text">ARZIKA<span class="text-white">UNIVERSE</span></h1>
+            <p class="text-xs text-gray-400 mt-1">RAYCAST ENGINE // v2.0</p>
+            <div class="mt-2 text-[10px] text-emerald-600" id="debugInfo">FPS: 60</div>
+        </div>
+        
+        <div class="pointer-events-auto flex flex-col items-end gap-2">
+            <canvas id="minimap" width="120" height="120" class="rounded opacity-90"></canvas>
+            <button id="genBtn" class="px-3 py-1.5 bg-emerald-900/50 hover:bg-emerald-700 border border-emerald-500/30 text-emerald-300 text-xs rounded transition-all">
+                <i class="fa-solid fa-shuffle mr-1"></i> NEW DIMENSION
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Viewport -->
+    <div class="relative w-full h-full flex items-center justify-center bg-black scanlines overflow-hidden">
+        <!-- Sky/Floor Gradients -->
+        <div class="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-gray-900 to-black z-0"></div>
+        <div class="absolute bottom-0 left-0 w-full h-1/2 bg-gradient-to-t from-gray-900 to-black z-0"></div>
+        
+        <!-- The Raycast Canvas -->
+        <canvas id="screen" class="relative z-1 w-full h-full object-cover" style="image-rendering: pixelated;"></canvas>
+        
+        <div class="vignette"></div>
+        
+        <!-- Message Overlay -->
+        <div id="message" class="absolute z-30 flex flex-col items-center justify-center text-center hidden">
+            <h2 class="text-4xl font-bold text-emerald-400 hud-text mb-2">ESCAPED</h2>
+            <p class="text-sm text-gray-300">Generating new sector...</p>
+        </div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="mobileControls" class="absolute bottom-6 left-0 w-full px-8 z-30 flex justify-between items-end sm:hidden pb-safe">
+        <!-- D-Pad -->
+        <div class="grid grid-cols-3 gap-2 w-32 h-32">
+            <div></div>
+            <div id="btnUp" class="dpad-btn w-full h-full"><i class="fa-solid fa-chevron-up"></i></div>
+            <div></div>
+            
+            <div id="btnLeft" class="dpad-btn w-full h-full"><i class="fa-solid fa-chevron-left"></i></div>
+            <div id="btnDown" class="dpad-btn w-full h-full"><i class="fa-solid fa-chevron-down"></i></div>
+            <div id="btnRight" class="dpad-btn w-full h-full"><i class="fa-solid fa-chevron-right"></i></div>
+        </div>
+        
+        <!-- Action/Run -->
+        <div id="btnRun" class="dpad-btn w-20 h-20 rounded-full border-emerald-500/50 bg-emerald-900/20">
+            <span class="text-xs font-bold text-emerald-400">RUN</span>
+        </div>
+    </div>
+
+    <!-- Desktop Hints -->
+    <div class="hidden sm:block absolute bottom-4 w-full text-center text-xs text-gray-500 z-20 pointer-events-none">
+        WASD to Move • ARROWS to Turn • SHIFT to Run
+    </div>
+
+<script>
+    // --- ENGINE SETTINGS ---
+    const MAP_WIDTH = 24;
+    const MAP_HEIGHT = 24;
+    const SCREEN_WIDTH = 640;  // Internal resolution
+    const SCREEN_HEIGHT = 360; // Internal resolution
+    const FOV = 0.40;
+    
+    // --- STATE ---
+    let worldMap = [];
+    let posX = 0, posY = 0;     // Player position
+    let dirX = -1, dirY = 0;    // Direction vector
+    let planeX = 0, planeY = 0.40; // Camera plane (determines FOV)
+    let lastTime = 0;
+    let fps = 0;
+    
+    // Input State
+    const keys = { w: false, a: false, s: false, d: false, Shift: false, ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false };
+
+    // DOM Elements
+    const canvas = document.getElementById('screen');
+    canvas.width = SCREEN_WIDTH;
+    canvas.height = SCREEN_HEIGHT;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    
+    const miniCanvas = document.getElementById('minimap');
+    const miniCtx = miniCanvas.getContext('2d');
+    
+    // --- MAZE GENERATION (Recursive Backtracker) ---
+    function generateMaze() {
+        // 1. Initialize Map with Walls (1)
+        const map = [];
+        for(let y=0; y<MAP_HEIGHT; y++) {
+            const row = [];
+            for(let x=0; x<MAP_WIDTH; x++) {
+                row.push(1);
+            }
+            map.push(row);
+        }
+
+        // 2. Carve
+        const stack = [];
+        const startX = 1;
+        const startY = 1;
+        map[startY][startX] = 0;
+        stack.push({x: startX, y: startY});
+
+        const dirs = [
+            {x: 0, y: -2}, // N
+            {x: 2, y: 0},  // E
+            {x: 0, y: 2},  // S
+            {x: -2, y: 0}  // W
+        ];
+
+        while(stack.length > 0) {
+            const current = stack[stack.length - 1];
+            
+            // Find unvisited neighbors
+            const neighbors = [];
+            for(let d of dirs) {
+                const nx = current.x + d.x;
+                const ny = current.y + d.y;
+                
+                if(nx > 0 && nx < MAP_WIDTH-1 && ny > 0 && ny < MAP_HEIGHT-1 && map[ny][nx] === 1) {
+                    neighbors.push({x: nx, y: ny, dx: d.x/2, dy: d.y/2});
+                }
+            }
+
+            if(neighbors.length > 0) {
+                // Choose random neighbor
+                const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+                // Remove wall between
+                map[current.y + next.dy][current.x + next.dx] = 0;
+                // Mark next as visited
+                map[next.y][next.x] = 0;
+                stack.push({x: next.x, y: next.y});
+            } else {
+                stack.pop();
+            }
+        }
+
+        // 3. Create Exit
+        // Find a floor tile far from start
+        map[MAP_HEIGHT-2][MAP_WIDTH-2] = 0; 
+        map[MAP_HEIGHT-2][MAP_WIDTH-3] = 0; 
+
+        // Reset Player
+        posX = 1.5;
+        posY = 1.5;
+        dirX = 1; dirY = 0;
+        planeX = 0; planeY = 0.66;
+
+        worldMap = map;
+    }
+
+    // --- RENDERING ENGINE (Raycasting) ---
+    function drawGame() {
+        // Clear Screen (with ceiling/floor already handled by CSS gradients, but we clear for safety)
+        ctx.clearRect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+        // 1. RAYCASTING LOOP
+        for(let x = 0; x < SCREEN_WIDTH; x++) {
+            // Calculate ray position and direction
+            const cameraX = 2 * x / SCREEN_WIDTH - 1; // x-coordinate in camera space
+            const rayDirX = dirX + planeX * cameraX;
+            const rayDirY = dirY + planeY * cameraX;
+
+            // Which box of the map we're in
+            let mapX = Math.floor(posX);
+            let mapY = Math.floor(posY);
+
+            // Length of ray from current position to next x or y-side
+            let sideDistX;
+            let sideDistY;
+
+            // Length of ray from one x or y-side to next x or y-side
+            // (Optimized deltaDist calculation to avoid infinity)
+            const deltaDistX = (rayDirX === 0) ? 1e30 : Math.abs(1 / rayDirX);
+            const deltaDistY = (rayDirY === 0) ? 1e30 : Math.abs(1 / rayDirY);
+
+            let perpWallDist;
+
+            // What direction to step in x or y-direction (either +1 or -1)
+            let stepX;
+            let stepY;
+
+            let hit = 0; // Was there a wall hit?
+            let side; // Was a NS or a EW wall hit?
+
+            // Calculate step and initial sideDist
+            if (rayDirX < 0) {
+                stepX = -1;
+                sideDistX = (posX - mapX) * deltaDistX;
+            } else {
+                stepX = 1;
+                sideDistX = (mapX + 1.0 - posX) * deltaDistX;
+            }
+            if (rayDirY < 0) {
+                stepY = -1;
+                sideDistY = (posY - mapY) * deltaDistY;
+            } else {
+                stepY = 1;
+                sideDistY = (mapY + 1.0 - posY) * deltaDistY;
+            }
+
+            // Perform DDA (Digital Differential Analysis)
+            while (hit === 0) {
+                // Jump to next map square, OR in x-direction, OR in y-direction
+                if (sideDistX < sideDistY) {
+                    sideDistX += deltaDistX;
+                    mapX += stepX;
+                    side = 0; // X-side hit
+                } else {
+                    sideDistY += deltaDistY;
+                    mapY += stepY;
+                    side = 1; // Y-side hit
+                }
+                
+                // Check if ray has hit a wall
+                if (worldMap[mapY][mapX] > 0) hit = 1;
+            }
+
+            // Calculate distance projected on camera direction (Euclidean distance will give fisheye effect!)
+            if (side === 0) perpWallDist = (sideDistX - deltaDistX);
+            else            perpWallDist = (sideDistY - deltaDistY);
+
+            // Calculate height of line to draw on screen
+            const lineHeight = Math.floor(SCREEN_HEIGHT / perpWallDist);
+
+            // Calculate lowest and highest pixel to fill in current stripe
+            let drawStart = -lineHeight / 2 + SCREEN_HEIGHT / 2;
+            if(drawStart < 0) drawStart = 0;
+            let drawEnd = lineHeight / 2 + SCREEN_HEIGHT / 2;
+            if(drawEnd >= SCREEN_HEIGHT) drawEnd = SCREEN_HEIGHT - 1;
+
+            // --- COLOR CALCULATION ---
+            // Wall colors based on compass direction
+            let color; 
+            if (side === 0) {
+                // Vertical walls (East/West)
+                color = rayDirX > 0 ? '#10b981' : '#059669'; // Emerald 500/600
+            } else {
+                // Horizontal walls (North/South)
+                color = rayDirY > 0 ? '#047857' : '#065f46'; // Emerald 700/800
+            }
+
+            // Add depth shading (Fog)
+            // We simulate fog by mixing the wall color with black based on distance
+            // Since we can't easily mix hex in vanilla canvas efficiently per-strip without heavy parsing, 
+            // we will use GlobalAlpha or brightness modification.
+            // Faster approach: Just draw the color, then draw a black transparent rect over it.
+            
+            ctx.fillStyle = color;
+            ctx.fillRect(x, drawStart, 1, drawEnd - drawStart);
+
+            // Depth Fog
+            const alpha = Math.min(1, perpWallDist / 10); // Fade to black after 10 blocks
+            if (alpha > 0) {
+                ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+                ctx.fillRect(x, drawStart, 1, drawEnd - drawStart);
+            }
+        }
+
+        // Draw Minimap dots
+        drawMinimap();
+    }
+
+    function drawMinimap() {
+        const mw = miniCanvas.width;
+        const mh = miniCanvas.height;
+        const blockSize = mw / MAP_WIDTH;
+        
+        miniCtx.clearRect(0, 0, mw, mh);
+        
+        // Draw Walls
+        miniCtx.fillStyle = '#064e3b';
+        for(let y=0; y<MAP_HEIGHT; y++) {
+            for(let x=0; x<MAP_WIDTH; x++) {
+                if(worldMap[y][x] === 1) {
+                    miniCtx.fillRect(x*blockSize, y*blockSize, blockSize, blockSize);
+                }
+            }
+        }
+
+        // Draw Player
+        miniCtx.fillStyle = '#34d399';
+        miniCtx.beginPath();
+        miniCtx.arc(posX * blockSize, posY * blockSize, 3, 0, Math.PI*2);
+        miniCtx.fill();
+
+        // Draw View Cone (optional but cool)
+        miniCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+        miniCtx.beginPath();
+        miniCtx.moveTo(posX * blockSize, posY * blockSize);
+        miniCtx.lineTo((posX + dirX * 2) * blockSize, (posY + dirY * 2) * blockSize);
+        miniCtx.stroke();
+    }
+
+    // --- GAME LOOP ---
+    function update(dt) {
+        // Input Handling
+        const moveSpeed = (keys.Shift || keys.runBtn ? 5.0 : 3.0) * dt;
+        const rotSpeed = 2.5 * dt;
+
+        // Rotation
+        if (keys.ArrowRight || keys.d) {
+            // Rotate both dir and plane
+            const oldDirX = dirX;
+            dirX = dirX * Math.cos(rotSpeed) - dirY * Math.sin(rotSpeed);
+            dirY = oldDirX * Math.sin(rotSpeed) + dirY * Math.cos(rotSpeed);
+            const oldPlaneX = planeX;
+            planeX = planeX * Math.cos(rotSpeed) - planeY * Math.sin(rotSpeed);
+            planeY = oldPlaneX * Math.sin(rotSpeed) + planeY * Math.cos(rotSpeed);
+        }
+        if (keys.ArrowLeft || keys.a) {
+            const oldDirX = dirX;
+            dirX = dirX * Math.cos(-rotSpeed) - dirY * Math.sin(-rotSpeed);
+            dirY = oldDirX * Math.sin(-rotSpeed) + dirY * Math.cos(-rotSpeed);
+            const oldPlaneX = planeX;
+            planeX = planeX * Math.cos(-rotSpeed) - planeY * Math.sin(-rotSpeed);
+            planeY = oldPlaneX * Math.sin(-rotSpeed) + planeY * Math.cos(-rotSpeed);
+        }
+
+        // Movement
+        let moveStep = 0;
+        if (keys.ArrowUp || keys.w) moveStep = 1;
+        if (keys.ArrowDown || keys.s) moveStep = -1;
+
+        if (moveStep !== 0) {
+            const nextX = posX + dirX * moveSpeed * moveStep;
+            const nextY = posY + dirY * moveSpeed * moveStep;
+            
+            // Collision Detection (Simple box check)
+            // We check a small buffer around the player to prevent wall clipping
+            const buffer = 0.2;
+            
+            // Check X
+            if (worldMap[Math.floor(posY)][Math.floor(nextX + (dirX > 0 ? buffer : -buffer))] === 0) {
+                posX += dirX * moveSpeed * moveStep;
+            }
+            // Check Y
+            if (worldMap[Math.floor(nextY + (dirY > 0 ? buffer : -buffer))][Math.floor(posX)] === 0) {
+                posY += dirY * moveSpeed * moveStep;
+            }
+        }
+
+        // Win Condition check
+        if (posX > MAP_WIDTH - 3 && posY > MAP_HEIGHT - 3) {
+            showWin();
+        }
+    }
+
+    function showWin() {
+        const msg = document.getElementById('message');
+        msg.classList.remove('hidden');
+        setTimeout(() => {
+            msg.classList.add('hidden');
+            generateMaze(); // Infinite levels
+        }, 2000);
+    }
+
+    function loop(timestamp) {
+        const dt = (timestamp - lastTime) / 1000;
+        lastTime = timestamp;
+        fps = Math.round(1/dt);
+        document.getElementById('debugInfo').textContent = `FPS: ${fps} | POS: ${Math.floor(posX)},${Math.floor(posY)}`;
+
+        update(dt);
+        drawGame();
+        
+        requestAnimationFrame(loop);
+    }
+
+    // --- CONTROLS SETUP ---
+    window.addEventListener('keydown', e => {
+        if(keys.hasOwnProperty(e.key)) keys[e.key] = true;
+        if(e.key === 'Shift') keys.Shift = true;
+    });
+    window.addEventListener('keyup', e => {
+        if(keys.hasOwnProperty(e.key)) keys[e.key] = false;
+        if(e.key === 'Shift') keys.Shift = false;
+    });
+
+    // Touch Controls
+    const btnMap = {
+        'btnUp': ['ArrowUp'],
+        'btnDown': ['ArrowDown'],
+        'btnLeft': ['ArrowLeft'],
+        'btnRight': ['ArrowRight'],
+        'btnRun': ['runBtn'] // virtual key
+    };
+
+    Object.keys(btnMap).forEach(id => {
+        const el = document.getElementById(id);
+        const keyName = btnMap[id][0];
+        
+        const press = (e) => {
+            e.preventDefault();
+            if(keyName === 'runBtn') keys.runBtn = true;
+            else keys[keyName] = true;
+            el.style.backgroundColor = 'rgba(0, 255, 100, 0.4)';
+        };
+        
+        const release = (e) => {
+            e.preventDefault();
+            if(keyName === 'runBtn') keys.runBtn = false;
+            else keys[keyName] = false;
+            el.style.backgroundColor = '';
+        };
+
+        el.addEventListener('mousedown', press);
+        el.addEventListener('mouseup', release);
+        el.addEventListener('touchstart', press);
+        el.addEventListener('touchend', release);
+        el.addEventListener('mouseleave', release);
+    });
+
+    // Init
+    document.getElementById('genBtn').addEventListener('click', generateMaze);
+    generateMaze();
+    requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
